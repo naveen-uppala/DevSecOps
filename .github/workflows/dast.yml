@@ -1,11 +1,9 @@
 name: DAST Security Scan
 
 on:
-  workflow_dispatch:          # Manual trigger
+  workflow_dispatch:
   push:
-    branches: [ main ]        # Auto trigger on push to main
-  pull_request:
-    branches: [ main ]        # Auto trigger on PR to main
+    branches: [ main ]
 
 permissions:
   contents: read
@@ -18,32 +16,25 @@ jobs:
 
     steps:
 
-      # ── 1. Checkout repository ────────────────────────────────────────────
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ── 2. Fix permissions so ZAP Docker container can write reports ───────
       - name: Fix ZAP folder permissions
         run: chmod -R 777 .github/workflows/zap/
 
-      # ── 3. Run ZAP Automation Framework Scan ──────────────────────────────
       - name: OWASP ZAP Authenticated DAST Scan
         uses: zaproxy/action-af@v0.2.0
+        continue-on-error: true          # ← replaces fail_action (not supported in action-af)
         with:
           plan: '.github/workflows/zap/plan.yml'
-          fail_action: false
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # token and fail_action are NOT valid inputs for action-af — removed
 
-      # ── 4. Debug: List generated files ────────────────────────────────────
       - name: List generated reports
         if: always()
         run: |
           echo "====== ZAP folder contents ======"
           ls -la .github/workflows/zap/
-          echo "====== Workspace root ======"
-          ls -la
 
-      # ── 5. Upload reports as GitHub artifacts ─────────────────────────────
       - name: Upload ZAP Scan Reports
         if: always()
         uses: actions/upload-artifact@v4
