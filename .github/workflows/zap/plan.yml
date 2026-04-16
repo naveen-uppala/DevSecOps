@@ -1,0 +1,80 @@
+env:
+  contexts:
+    - name: "altoro-context"
+      urls:
+        - "http://demo.testfire.net"
+      includePaths:
+        - "http://demo.testfire.net/.*"
+      excludePaths:
+        - "http://demo.testfire.net/logout.jsp"
+
+      authentication:
+        method: "form"
+        parameters:
+          loginPageUrl:     "http://demo.testfire.net/login.jsp"
+          loginRequestUrl:  "http://demo.testfire.net/doLogin"
+          loginRequestBody: "uid={%username%}&passw={%password%}&btnSubmit=Login"
+        verification:
+          method: "response"
+          loggedInRegex:  "(?i)sign off"
+          loggedOutRegex: "(?i)sign in"
+
+      sessionManagement:
+        method: "cookie"
+
+      users:
+        - name: "admin-user"
+          credentials:
+            username: "jsmith"
+            password: "Demo1234"
+
+  parameters:
+    failOnError:      true
+    failOnWarning:    false
+    progressToStdout: true
+
+jobs:
+  # ── Step 1: Verify authentication BEFORE scan starts ────────────────────
+  - type: requestor
+    parameters:
+      user:   "admin-user"
+      url:    "http://demo.testfire.net/bank/main.jsp"
+      method: "GET"
+    tests:
+      - type: "statusCode"
+        operator: "=="
+        value: 200
+        onFail: "warn"
+
+  # ── Step 2: Spider (crawl) the application ───────────────────────────────
+  - type: spider
+    parameters:
+      context:     "altoro-context"
+      user:        "admin-user"
+      maxDuration: 3
+
+  # ── Step 3: Active Scan (attack) ─────────────────────────────────────────
+  - type: activeScan
+    parameters:
+      context:               "altoro-context"
+      user:                  "admin-user"
+      maxScanDurationInMins: 5
+
+  # ── Step 4: Generate Reports ──────────────────────────────────────────────
+  - type: report
+    parameters:
+      template:   "traditional-html"
+      reportDir:  "."
+      reportFile: "report_html.html"
+
+  - type: report
+    parameters:
+      template:   "traditional-json"
+      reportDir:  "."
+      reportFile: "report_json.json"
+
+  - type: report
+    parameters:
+      template:   "traditional-md"
+      reportDir:  "."
+      reportFile: "report_md.md"
