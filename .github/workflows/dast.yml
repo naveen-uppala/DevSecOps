@@ -2,10 +2,10 @@ name: DAST Security Scan
 
 on:
   workflow_dispatch:
-  # push:
-  #   branches: [ main ]
-  # pull_request:
-  #   branches: [ main ]
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 permissions:
   contents: read
@@ -18,32 +18,102 @@ jobs:
 
     steps:
 
+      # ── 1. Checkout ────────────────────────────────────────────────────────
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ── 2. PRE-FLIGHT: Validate credentials BEFORE wasting scan time ───────
+      #       Fails immediately if login credentials in plan.yml are wrong
+      - name: Pre-flight Authentication Check
+        run: |
+          echo "🔐 Validating credentials against target before scan starts..."
+
+          # Extract credentials from plan.yml
+          USERNAME=$(grep 'username:' .github/workflows/zap/plan.yml | awk '{print $2}' | tr -d '"')
+          PASSWORD=$(grep 'password:' .github/workflows/zap/plan.yml | awk '{print $2}' | tr -d '"')
+          LOGIN_URL="http://demo.testfire.net/doLogin"
+          PROTECTED_URL="http://demo.testfire.net/bank/main.jsp"
+
+          echo "  Target    : $LOGIN_URL"
+          echo "  Username  : $USERNAME"
+          echo "  Password  : [hidden]"
+          echo ""
+
+          # Step 1: POST credentials — capture session cookie + redirect location
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -c /tmp/zap_cookies.txt \
+            -X POST "$LOGIN_URL" \
+            -d "uid=${USERNAME}&passw=${PASSWORD}&btnSubmit=Login")
+
+          LOCATION=$(curl -s -o /dev/null -w "%{redirect_url}" \
+            -c /tmp/zap_cookies.txt \
+            -X POST "$LOGIN_URL" \
+            -d "uid=${USERNAME}&passw=${PASSWORD}&btnSubmit=Login")
+
+          echo "  Login response code : $HTTP_CODE"
+          echo "  Redirect location   : $LOCATION"
+
+          # Step 2: Check redirect goes to protected page, not back to login
+          if [[ "$HTTP_CODE" != "302" ]]; then
+            echo ""
+            echo "❌ AUTHENTICATION FAILED — Expected 302 redirect, got $HTTP_CODE"
+            echo "   Check if the target application is reachable."
+            exit 1
+          fi
+
+          if echo "$LOCATION" | grep -q "login"; then
+            echo ""
+            echo "❌ AUTHENTICATION FAILED — Redirected back to login page"
+            echo "   Wrong username or password in plan.yml"
+            echo "   Fix: .github/workflows/zap/plan.yml → users → credentials"
+            exit 1
+          fi
+
+          # Step 3: Use the session cookie to access a protected page
+          PROTECTED_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -b /tmp/zap_cookies.txt \
+            "$PROTECTED_URL")
+
+          echo "  Protected page response : $PROTECTED_CODE"
+
+          if [[ "$PROTECTED_CODE" != "200" ]]; then
+            echo ""
+            echo "❌ AUTHENTICATION FAILED — Could not access protected page ($PROTECTED_CODE)"
+            echo "   Login may have succeeded but session is not valid."
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Authentication verified — credentials are valid, session established"
+          echo "   Proceeding to DAST scan..."
+
+      # ── 3. Fix ZAP folder permissions ─────────────────────────────────────
       - name: Fix ZAP folder permissions
         run: chmod -R 777 .github/workflows/zap/
 
+      # ── 4. Run ZAP Scan (only reaches here if auth check passed) ──────────
       - name: OWASP ZAP Authenticated DAST Scan
         uses: zaproxy/action-af@v0.2.0
         continue-on-error: true
         with:
           plan: '.github/workflows/zap/plan.yml'
 
+      # ── 5. List generated reports ──────────────────────────────────────────
       - name: List generated reports
         if: always()
         run: |
           echo "====== ZAP folder contents ======"
           ls -la .github/workflows/zap/
 
-      # ── KEY STEP: Parse JSON report and write summary to GitHub Actions UI ─
-      - name: Publish DAST Summary to GitHub Actions
+      # ── 6. Parse results + write GitHub Actions Summary ───────────────────
+      #       Pipeline FAILS if High/Critical vulnerabilities found
+      - name: Publish DAST Summary — Fail on High/Critical
         if: always()
         run: |
           python3 << 'EOF'
           import json, os, sys
 
-          report_path = ".github/workflows/zap/report_json.json"
+          report_path  = ".github/workflows/zap/report_json.json"
           summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
 
           # ── Load report ───────────────────────────────────────────────────
@@ -51,24 +121,23 @@ jobs:
               with open(report_path) as f:
                   report = json.load(f)
           except Exception as e:
-              print(f"Could not read report: {e}")
-              sys.exit(0)
+              print(f"❌ Could not read report: {e}")
+              sys.exit(1)
 
-          # ── Count alerts by risk level ────────────────────────────────────
-          counts = {"High": 0, "Medium": 0, "Low": 0, "Informational": 0}
+          # ── Count alerts by risk level ─────────────────────────────────
+          counts    = {"High": 0, "Medium": 0, "Low": 0, "Informational": 0}
           alert_rows = []
 
           for site in report.get("site", []):
               for alert in site.get("alerts", []):
-                  risk     = alert.get("riskdesc", "").split(" ")[0]   # "High (High)" → "High"
+                  risk     = alert.get("riskdesc", "").split(" ")[0]
                   name     = alert.get("name", "Unknown")
                   count    = alert.get("count", "?")
-                  solution = alert.get("solution", "")[:120].strip()   # first 120 chars
+                  solution = alert.get("solution", "")[:120].strip()
 
                   if risk in counts:
                       counts[risk] += 1
 
-                  # emoji badge per risk
                   badge = {
                       "High":          "🔴 High",
                       "Medium":        "🟠 Medium",
@@ -78,11 +147,10 @@ jobs:
 
                   alert_rows.append((risk, badge, name, str(count), solution))
 
-          # ── Sort: High → Medium → Low → Info ─────────────────────────────
           order = {"High": 0, "Medium": 1, "Low": 2, "Informational": 3}
           alert_rows.sort(key=lambda x: order.get(x[0], 9))
 
-          # ── Decide overall status ─────────────────────────────────────────
+          # ── Overall status ────────────────────────────────────────────
           if counts["High"] > 0:
               status_icon  = "🔴"
               status_label = "CRITICAL — High severity issues found"
@@ -96,18 +164,14 @@ jobs:
               status_icon  = "✅"
               status_label = "PASSED — No significant issues found"
 
-          target = ""
-          if report.get("site"):
-              target = report["site"][0].get("@name", "")
+          target = report["site"][0].get("@name", "") if report.get("site") else ""
 
-          # ── Build markdown ────────────────────────────────────────────────
+          # ── Build summary markdown ────────────────────────────────────
           lines = []
           lines.append(f"# {status_icon} DAST Scan Results — {status_label}")
           lines.append("")
           lines.append(f"**Target:** `{target}`")
           lines.append("")
-
-          # Summary table
           lines.append("## Alert Summary")
           lines.append("")
           lines.append("| Severity | Count |")
@@ -119,7 +183,6 @@ jobs:
           lines.append(f"| **Total**        | **{sum(counts.values())}** |")
           lines.append("")
 
-          # Alert detail table — only High + Medium shown inline
           important = [r for r in alert_rows if r[0] in ("High", "Medium")]
           if important:
               lines.append("## High & Medium Severity Alerts")
@@ -127,12 +190,10 @@ jobs:
               lines.append("| Severity | Alert Name | Instances | Recommended Fix |")
               lines.append("|---|---|---|---|")
               for _, badge, name, count, solution in important:
-                  # clean solution text for table cell
                   sol_clean = solution.replace("|", "/").replace("\n", " ")
                   lines.append(f"| {badge} | {name} | {count} | {sol_clean}... |")
               lines.append("")
 
-          # Low alerts — just names
           low_alerts = [r for r in alert_rows if r[0] == "Low"]
           if low_alerts:
               lines.append("## Low Severity Alerts")
@@ -143,27 +204,25 @@ jobs:
                   lines.append(f"| {name} | {count} |")
               lines.append("")
 
-          lines.append("> 📥 Full reports (HTML, JSON, MD) available in the **Artifacts** section below.")
+          lines.append("> 📥 Full reports (HTML, JSON, MD) available in **Artifacts** below.")
 
-          # ── Also print to Actions log ─────────────────────────────────────
           summary_text = "\n".join(lines)
           print(summary_text)
 
-          # ── Write to GitHub Step Summary ──────────────────────────────────
           if summary_file:
               with open(summary_file, "w") as f:
                   f.write(summary_text)
               print("\n✅ Summary written to GitHub Actions Summary page")
-          else:
-              print("\n⚠️  GITHUB_STEP_SUMMARY not set (running locally?)")
 
-          # ── Fail pipeline if High vulnerabilities found ───────────────────
-          # Comment out the next 2 lines if you don't want pipeline to fail on High findings
+          # ── GATE: Fail pipeline on High/Critical findings ─────────────
           if counts["High"] > 0:
+              print(f"\n🚨 PIPELINE FAILED — {counts['High']} High severity vulnerabilities found")
+              print("   Review the Artifacts for full remediation details.")
               sys.exit(1)
 
           EOF
 
+      # ── 7. Upload reports — always runs even if pipeline failed ───────────
       - name: Upload ZAP Scan Reports
         if: always()
         uses: actions/upload-artifact@v4
