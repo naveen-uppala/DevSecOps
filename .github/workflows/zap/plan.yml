@@ -26,7 +26,7 @@ env:
         - name: "admin-user"
           credentials:
             username: "jsmith"
-            password: "Demo1234"
+            password: "Demo4321"
 
   parameters:
     failOnError:      true
