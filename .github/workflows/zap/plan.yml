@@ -34,33 +34,30 @@ env:
     progressToStdout: true
 
 jobs:
-  # ── Step 1: Verify authentication BEFORE scan starts ────────────────────
+  # ── Step 1: Verify auth — FIXED: url/method go under requests: list ──────
   - type: requestor
     parameters:
-      user:   "admin-user"
-      url:    "http://demo.testfire.net/bank/main.jsp"
-      method: "GET"
-    tests:
-      - type: "statusCode"
-        operator: "=="
-        value: 200
-        onFail: "warn"
+      user: "admin-user"
+    requests:
+      - url:          "http://demo.testfire.net/bank/main.jsp"
+        method:       "GET"
+        responseCode: 200        # ← replaces the broken tests: statusCode block
 
-  # ── Step 2: Spider (crawl) the application ───────────────────────────────
+  # ── Step 2: Spider ────────────────────────────────────────────────────────
   - type: spider
     parameters:
       context:     "altoro-context"
       user:        "admin-user"
       maxDuration: 3
 
-  # ── Step 3: Active Scan (attack) ─────────────────────────────────────────
+  # ── Step 3: Active Scan ───────────────────────────────────────────────────
   - type: activeScan
     parameters:
       context:               "altoro-context"
       user:                  "admin-user"
       maxScanDurationInMins: 5
 
-  # ── Step 4: Generate Reports ──────────────────────────────────────────────
+  # ── Step 4: Reports ───────────────────────────────────────────────────────
   - type: report
     parameters:
       template:   "traditional-html"
