@@ -2,77 +2,40 @@ name: SonarCloud Analysis
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, develop]
   pull_request:
     types: [opened, synchronize, reopened]
 
 jobs:
-  build-and-scan:
-    name: Build & SonarCloud Scan
+  sonar-scan:
+    name: SonarCloud Scan
     runs-on: ubuntu-latest
 
     steps:
-      # ----------------------------------------
-      # Checkout full history for SonarCloud
-      # ----------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # ----------------------------------------
-      # Setup Node.js
-      # ----------------------------------------
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
-          cache-dependency-path: package-lock.json   # Root package-lock.json
+          cache-dependency-path: package-lock.json
 
-      # ----------------------------------------
-      # STEP 1: Install React dependencies (root)
-      # ----------------------------------------
-      - name: Install React dependencies
+      - name: Install dependencies
         run: npm ci
 
-      # ----------------------------------------
-      # STEP 2: Run React tests with coverage
-      # ----------------------------------------
-      - name: Run React tests with coverage
+      - name: Run tests with coverage
         run: npm run test:coverage
         env:
           CI: true
 
-      # ----------------------------------------
-      # STEP 3: Build React app
-      # ----------------------------------------
-      - name: Build React app
-        run: npm run build
-        env:
-          CI: false                                  # Prevents warnings failing the build
-
-      # ----------------------------------------
-      # STEP 4: Copy React build → server/build/
-      # ----------------------------------------
-      - name: Copy build to server folder
-        run: cp -r build/ server/build/
-
-      # ----------------------------------------
-      # STEP 5: Install Express dependencies
-      # ----------------------------------------
-      - name: Install Express dependencies
-        working-directory: ./server
-        run: npm ci
-
-      # ----------------------------------------
-      # STEP 6: SonarCloud Scan
-      # Single scan — covers src/ + server/
-      # ----------------------------------------
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master
         with:
-          projectBaseDir: ./                         # Root where sonar-project.properties lives
+          projectBaseDir: ./
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
