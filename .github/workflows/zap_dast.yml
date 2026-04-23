@@ -174,7 +174,7 @@ jobs:
 
           # Add https:// if not present
           if [[ "$APP_URL" != http* ]]; then
-            APP_URL="https://$APP_URL"
+            APP_URL="http://$APP_URL"
           fi
 
           echo "App URL: $APP_URL"
