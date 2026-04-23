@@ -1,4 +1,4 @@
-name: Frontend CD EKS Workflow
+name: ZAP DAST EKS Workflow
 
 on:
   workflow_dispatch:
