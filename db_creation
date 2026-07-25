@@ -1,0 +1,6 @@
+
+CREATE DATABASE my_local_db;
+
+CREATE USER 'my_username'@'localhost' IDENTIFIED BY 'my_secure_password';
+
+GRANT ALL PRIVILEGES ON my_local_db.* TO 'my_username'@'localhost';
