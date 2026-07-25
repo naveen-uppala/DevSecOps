@@ -1,6 +1,12 @@
 
 CREATE DATABASE my_local_db;
 
-CREATE USER 'my_username'@'localhost' IDENTIFIED BY 'my_secure_password';
+CREATE USER 'my_username'@'localhost' IDENTIFIED BY 'my_secure_password';   [my_username=naveenuppala, my_secure_password=demoworkshop]
 
 GRANT ALL PRIVILEGES ON my_local_db.* TO 'my_username'@'localhost';
+
+
+
+spring.datasource.url=jdbc:mysql://localhost:3306/my_local_db
+spring.datasource.username=naveenuppala
+spring.datasource.password=demoworkshop
